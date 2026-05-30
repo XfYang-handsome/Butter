@@ -1,27 +1,21 @@
-package main
+﻿package main
 
 import (
 	"Butter/inter"
-	"sync"
+	"fmt"
+	"os"
 )
 
-//TIP <p>To run your code, right-click the code and select <b>Run</b>.</p> <p>Alternatively, click
-// the <icon src="AllIcons.Actions.Execute"/> icon in the gutter and select the <b>Run</b> menu item from here.</p>
-
 func main() {
-	var wg sync.WaitGroup
+	if len(os.Args) < 2 {
+		fmt.Println("Please provide a .but file to run.")
+		return
+	}
 
 	inter.EachButterFunction()
-	for key, line := range inter.ButterFunctions {
-		if inter.NameToFunctions[key].DoRun {
-			wg.Add(1)
-			func() {
-				inter.ButterInterpreter(line, inter.ButterLines[key], *inter.NameToFunctions[key], inter.ObjectFunc)
-				wg.Done()
-			}()
+	for name, body := range inter.ButterFunctions {
+		if fn, ok := inter.NameToFunctions[name]; ok && fn.DoRun {
+			inter.ButterInterpreter(body, inter.ButterLines[name], *fn, inter.ObjectFunc)
 		}
-
 	}
-	wg.Wait()
-
 }

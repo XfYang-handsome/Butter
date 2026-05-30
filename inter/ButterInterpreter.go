@@ -2,91 +2,15 @@ package inter
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
-func inMap(key string, mapping map[string]any) bool {
-	_, ok := mapping[key]
-	return ok
-}
-func inMapT(key string, mapping map[string]Types) bool {
-	_, ok := mapping[key]
-	return ok
-}
-func getKey(val int, m map[int]int) (int, error) {
-	for k, v := range m {
-		if v == val {
-			return k, nil
-		}
-	}
-	return 0, errors.New("can not find key")
-}
-func getKeyT(val Types, m map[string]Types) (string, error) {
-	for k, v := range m {
-		if v == val {
-			return k, nil
-		}
-	}
-	return "", errors.New("can not find key")
-}
-
-func NewError(s string, f string, l int) { //创建一个新的Error
-	println()
-	fmt.Println(errors.New(s))
-	fmt.Print("\tat file: ", f, ", line: ", l)
-	println()
-	syscall.Exit(0)
-}
-
-func VariantToButter(v *string, l int) *ButterVariants { //将某个字符串转换为Butter变量
-	var filename = os.Args[1]
-
-	str := *v
-	if str[0] == '"' && str[len(str)-1] == '"' {
-		bVar := &ButterVariants{Type: String, value: str[1 : len(str)-1]}
-		return bVar
-	}
-
-	numI, errI := strconv.ParseInt(str, 10, 64)
-	if errI == nil {
-		bVar := &ButterVariants{Type: Int, value: numI}
-		return bVar
-	}
-
-	numF, errF := strconv.ParseFloat(str, 64)
-	if errF == nil {
-		bVar := &ButterVariants{Type: Float, value: numF}
-		return bVar
-	}
-
-	numB, errB := strconv.ParseBool(str)
-	if errB == nil {
-		bVar := &ButterVariants{Type: Bool, value: numB}
-		return bVar
-	}
-
-	if str == ")" || str == "(" { //括号需作为单独的变量读取
-		bVar := &ButterVariants{Type: String, value: str}
-		return bVar
-	}
-
-	if inMapT(str, TypeToBType) {
-		bVar := &ButterVariants{Type: Object, value: TypeToBType[str]}
-		return bVar
-	}
-
-	NewError("Error: can not parse the element "+str, filename, l)
-	return nil
-}
-
-func ButterInterpreter(words [][]string, lines []int, bFunc Function, fatherFunc *Function) { //编译某个Butter代码块
+func ButterInterpreter(words BytecodeFile, lines []int, bFunc FuncDef, fatherFunc *FuncDef) { //编译某个Butter代码块
 
 	var filename = os.Args[1]
 	variants := map[string]*ButterVariants{}
@@ -437,9 +361,11 @@ func ButterInterpreter(words [][]string, lines []int, bFunc Function, fatherFunc
 			bFunc.execStack.push(&ButterVariants{Type: Bool, value: args[0].value == args[1].value})
 		}, //逻辑
 		"compareTo": func() {
+
 			if bFunc.execStack.isEmpty() {
 				NewError("Error: arguments of function \"compareTo\" are missing", filename, currentLine)
 			}
+
 			if bFunc.execStack.top().value != "(" {
 				NewError("Error: missing \"(\" of function \"compareTo\"", filename, currentLine)
 			}
@@ -457,6 +383,7 @@ func ButterInterpreter(words [][]string, lines []int, bFunc Function, fatherFunc
 				}
 
 			}
+
 			bFunc.execStack.pop()
 			if len(args) != 3 {
 				NewError("Error: incorrect number of arguments for \"compareTo\" function", filename, currentLine)
@@ -625,10 +552,6 @@ func ButterInterpreter(words [][]string, lines []int, bFunc Function, fatherFunc
 				bFunc.execStack.push(&ButterVariants{Type: String, value: strconv.FormatBool(args[0].value.(bool))})
 			case Char:
 				bFunc.execStack.push(&ButterVariants{Type: String, value: string(args[0].value.(byte))})
-			case Array:
-
-			case Map:
-
 			case Object:
 				v, _ := getKeyT(args[0].value.(Types), TypeToBType)
 				bFunc.execStack.push(&ButterVariants{Type: String, value: v})
@@ -697,92 +620,104 @@ func ButterInterpreter(words [][]string, lines []int, bFunc Function, fatherFunc
 		var leftStack Stack //左栈
 		doVariant = false
 		for i := len(words[h]) - 1; i >= 0; i-- { //读取一行Butter代码
-			if variants[words[h][i]] != nil { //是否是已有变量
-				if doSet { //如果在赋值符左侧
-					leftStack.push(variants[words[h][i]])
+			token := words[h][i]
+			switch token.Op {
+			case OpLiteral, OpType, OpParenOpen, OpParenClose:
+				if token.Op == OpType {
+					doVariant = true
+				}
+				if doSet {
+					leftStack.push(token.Variant)
 				} else {
-					bFunc.execStack.push(variants[words[h][i]])
+					bFunc.execStack.push(token.Variant)
 				}
-			} else if inMap(words[h][i], types) { //如果是类型
-				doVariant = true
-				if doSet { //如果在赋值符左侧
-					leftStack.push(&ButterVariants{Type: Object, value: TypeToBType[words[h][i]]})
-				} else {
-					bFunc.execStack.push(&ButterVariants{Type: Object, value: TypeToBType[words[h][i]]})
-				}
-			} else if functions[words[h][i]] != nil { //是否是内置函数
-				functions[words[h][i]]()
-			} else if ButterFunctions[words[h][i]] != nil { //是否是自定义的Butter函数
-				newFunc := NameToFunctions[words[h][i]]
-				if bFunc.execStack.isEmpty() {
-					NewError("Error: arguments of function \""+words[h][i]+"\" are missing", filename, currentLine)
-				}
-				if bFunc.execStack.top().value != "(" {
-					NewError("Error: missing \"(\" of function \""+words[h][i]+"\"", filename, currentLine)
-				}
-				var fVar = make(map[string]ButterVariants)
-				if newFunc.name == bFunc.name {
-					for k, v := range bFunc.args {
-						fVar[k] = *v
-					}
-				}
-
-				var keys []string
-				for k := range newFunc.args {
-					keys = append(keys, k)
-				}
-				k := 0
-				for bFunc.execStack.top().value != ")" {
-					if bFunc.execStack.top().value != "(" {
-						if k >= len(keys) {
-
-							NewError("Error: wrong arguments for \""+words[h][i]+"\"", filename, currentLine)
-						}
-						if bFunc.execStack.top().Type != newFunc.args[keys[k]].Type {
-							NewError("Error: wrong type for \""+words[h][i]+"\"", filename, currentLine)
-						}
-						newFunc.args[keys[k]].value = bFunc.execStack.top().value
-						k++
-					}
-					bFunc.execStack.pop()
-
-				}
-				bFunc.execStack.pop()
-				ButterInterpreter(ButterFunctions[newFunc.name], ButterLines[newFunc.name], *newFunc, &bFunc)
-				if len(fVar) != 0 {
-					for k, v := range fVar {
-						variants[k] = &v
-					}
-				}
-
-			} else if words[h][i] == "butter" { //如果是butter关键字
-				if !doSet {
-					bFunc.execStack.pop()
-				} else {
-					leftStack.s = leftStack.s[1:]
-				}
-			} else if words[h][i] == "/if" { //如果是/if
-				//跳过
-			} else if words[h][i] == "=" { //如果是赋值符
+			case OpAssign:
 				doSet = true
-			} else {
-				if i > 0 && words[h][0] == "butter" && doVariant { //是否是新定义的变量
-					if functions[words[h][i]] != nil {
+			case OpBuiltin:
+				functions[token.Text]()
+			case OpKeyword:
+				switch token.Text {
+				case "butter":
+					if !doSet {
+						bFunc.execStack.pop()
+					} else {
+						leftStack.s = leftStack.s[1:]
+					}
+
+				default:
+				}
+			case OpName:
+				if variants[token.Text] != nil {
+					if doSet {
+						leftStack.push(variants[token.Text])
+					} else {
+						bFunc.execStack.push(variants[token.Text])
+					}
+				} else if ButterFunctions[token.Text] != nil {
+					newFunc := NameToFunctions[token.Text]
+					if bFunc.execStack.isEmpty() {
+						NewError("Error: arguments of function \""+token.Text+"\" are missing", filename, currentLine)
+					}
+					if bFunc.execStack.top().value != "(" {
+						NewError("Error: missing \"(\" of function \""+token.Text+"\"", filename, currentLine)
+					}
+					var fVar = make(map[string]ButterVariants)
+					if newFunc.name == bFunc.name {
+						for k, v := range bFunc.args {
+							fVar[k] = *v
+						}
+					}
+
+					keys := make([]string, len(newFunc.argNames))
+					copy(keys, newFunc.argNames)
+					for k := range newFunc.args {
+						keys = append(keys, k)
+					}
+					k := 0
+					for bFunc.execStack.top().value != ")" {
+						if bFunc.execStack.top().value != "(" {
+							if k >= len(keys) {
+
+								NewError("Error: wrong arguments for \""+token.Text+"\"", filename, currentLine)
+							}
+							if bFunc.execStack.top().Type != newFunc.args[keys[k]].Type {
+								NewError("Error: wrong type for \""+token.Text+"\"", filename, currentLine)
+							}
+							newFunc.args[keys[k]].value = bFunc.execStack.top().value
+							k++
+						}
+						bFunc.execStack.pop()
+
+					}
+					bFunc.execStack.pop()
+					callFunc := *newFunc
+					callFunc.execStack = Stack{}
+					callFunc.args = make(map[string]*ButterVariants, len(newFunc.args))
+					for k, v := range newFunc.args {
+						clone := *v
+						callFunc.args[k] = &clone
+					}
+					ButterInterpreter(ButterFunctions[newFunc.name], ButterLines[newFunc.name], callFunc, &bFunc)
+					if len(fVar) != 0 {
+						for k, v := range fVar {
+							variants[k] = &v
+						}
+					}
+				} else if i > 0 && words[h][0].Text == "butter" && doVariant {
+					if token.Op == OpBuiltin || token.Op == OpKeyword {
 						NewError("Error: can not use keyword as variant name", filename, currentLine)
 					}
 
-					if doSet { //如果在赋值符左侧
-						variants[words[h][i]] = &ButterVariants{Type: leftStack.bottom().value.(Types), value: types[words[h][i+1]]}
-						leftStack.push(variants[words[h][i]])
+					if doSet {
+						variants[token.Text] = &ButterVariants{Type: leftStack.bottom().value.(Types), value: types[words[h][i+1].Text]}
+						leftStack.push(variants[token.Text])
 					} else {
-						variants[words[h][i]] = &ButterVariants{Type: bFunc.execStack.bottom().value.(Types), value: types[words[h][i+1]]}
+						variants[token.Text] = &ButterVariants{Type: bFunc.execStack.bottom().value.(Types), value: types[words[h][i+1].Text]}
 					}
 				} else {
-					butter := VariantToButter(&words[h][i], currentLine)
-					bFunc.execStack.push(butter)
+					bFunc.execStack.push(&ButterVariants{Type: Variable, value: token.Text})
 				}
 			}
-
 		}
 
 		if doSet { //一行结束后，如果需要有赋值
