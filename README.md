@@ -21,6 +21,7 @@ run main()
     i = add(i, 1)
   /for
   println(sum)
+/func
 
 //Calculate the factorial of an integer.
 func fact(n int)
@@ -28,8 +29,10 @@ func fact(n int)
     return 1
   /if
   return mul(n, fact(sub(n, 1)))
+/func
 
 //Welcome user.
 func welcome(name string)
   println("Hello,", name, "!")
+/func
 ```
